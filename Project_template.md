@@ -5,9 +5,32 @@
 1. Спроектируйте to be архитектуру КиноБездны, разделив всю систему на отдельные домены и организовав интеграционное взаимодействие и единую точку вызова сервисов.
 Результат представьте в виде контейнерной диаграммы в нотации С4.
 Добавьте ссылку на файл в этот шаблон
-[ссылка на файл](ссылка)
+
+!!!!***!!!!!!!!! ***ОБРАТИТЕ ВНИМАНИЕ что с клоном проекта идет чье-то решение в файле README-правка.md. Я им не пользовалась, просто наверное лучше его убрать из шаблона? ****!!!!!!!!!!!!!!!
+
+## Решение:
+Я бы описала тут две схемы:
+
+1. Выявленные мной сервисы впринципе:
+User Service: все что связано с менеджментом пользователей, авторизация, пароль, данные профиля и тд. Публикует событие создания юзера в кафку.
+Catalog Service: каталог фильмов. Получает асинхронно данные из рекомендательной системы которые она публикует в очередь в Кафку
+Subscription service: сервис подписки и оплаты. Публикует событие оплаты в Кафку
+Ranking Service: Ранжирование (оценка) фильмов пользователем и добавление в фавориты. Может быть одним сервисом, может влиять на рекомендательную систему через кафку, когда публикуемые оценки пользователя используются для апдейта данных в ней
+
+[Диаграмма контейнеров только микросервисы ](docs/architecture/containers_cinema.md)
+
+
+2. Сервисы с учетом задания с MVP и монолита:
+В этом случае прокси с флагом куда направлять трафик (в монолит или в микросервис) для реализации Strangler Fig может сидеть в существующем API Gateway. Rabbit я заменила на Кафку на схеме раз с ним работаем в задании, и добавила сервис Events, который пишет события о пользователе, оплате и фильмах в Кафку. Он же по заданию будет и producer и consumer в одном, а контейнер Movies тогда с Кафкой не общается.
+[Диаграмма контейнеров микросервисы и монолит](docs/architecture/containers_cinema_monolith.md)
+
+
 
 # Задание 2
+ДИСКЛЕЙМЕР:
+В части заданий ниже, где требуется писать код для сервисов, я использовала ЛЛМ как вспомогательный инструмент. Моя основная область — дата-аналитика, поэтому самостоятельная реализация сервисной части с нуля потребовала бы значительного фокуса именно на написании кода.
+В рамках учебы я хочу успеть сосредоточиться на понимании архитектуры, логики решения и устройства сервисов, и я аргументирую ниже в тексте все решения.
+Описание заданий я оставляю, под ними описания решений.
 
 ### 1. Proxy
 Команда КиноБездны уже выделила сервис метаданных о фильмах movies и вам необходимо реализовать бесшовный переход с применением паттерна Strangler Fig в части реализации прокси-сервиса (API Gateway), с помощью которого можно будет постепенно переключать траффик, используя фиче-флаг.
@@ -32,7 +55,7 @@
       MONOLITH_URL: http://monolith:8080
       #монолит
       MOVIES_SERVICE_URL: http://movies-service:8081 #сервис movies
-      EVENTS_SERVICE_URL: http://events-service:8082 
+H      EVENTS_SERVICE_URL: http://events-service:8082
       GRADUAL_MIGRATION: "true" # вкл/выкл простого фиче-флага
       MOVIES_MIGRATION_PERCENT: "50" # процент миграции
     networks:
@@ -47,6 +70,24 @@
 - Протестируйте постепенный переход, изменив переменную окружения MOVIES_MIGRATION_PERCENT в файле docker-compose.yml.
 
 
+### Решение прокси:
+Переменные в код сервиса прокси для логики feature flag возьму
+из общего docker-compose.yml. Docker Compose передает эти переменные в контейнер при запуске, значит в коде можно использовать подход
+GRADUAL_MIGRATION=false
+  → все /api/movies идет в monolith
+
+GRADUAL_MIGRATION=true
+  → применяется MOVIES_MIGRATION_PERCENT
+
+/api/movies
+  → monolith или movies-service по feature flag
+
+все остальное
+  → monolith
+
+Судя по тестам, понадобится так же обработчик для эндпойнта health.
+Реализация в ./src/microservices/proxy.
+
 ### 2. Kafka
  Вам как архитектуру нужно также проверить гипотезу насколько просто реализовать применение Kafka в данной архитектуре.
 
@@ -56,22 +97,47 @@
     - Реализуйте простой API, при вызове которого будут создаваться события User/Payment/Movie и обрабатываться внутри сервиса с записью в лог
     - Добавьте в docker-compose новый сервис, kafka там уже есть
 
-Необходимые тесты для проверки этого API вызываются при запуске npm run test:local из папки tests/postman 
-Приложите скриншот тестов и скриншот состояния топиков Kafka из UI http://localhost:8090 
+Необходимые тесты для проверки этого API вызываются при запуске npm run test:local из папки tests/postman
+Приложите скриншот тестов и скриншот состояния топиков Kafka из UI http://localhost:8090
+
+
+
+### Решение Кафка:
+Поскольку в docker-compose.yml указан образ и сетевой путь к Кафке, то при запуске целиком он создаст контейнер с кафкой, к которому мой events service будет подключаться по адресу кафка-брокера kafka:9092.
+
+POST /api/events/payment (or /user, or /movies ) это энд-пойнт для вызова Events Service.
+И он внутри уже обращается к Кафке 
+ 
+Events Service producer:
+kafka:9092
+  → topic payment-events
+
+Events Service consumer:
+kafka:9092
+  → topic payment-events
+  → service logs
+
+Обработка сообщения только у того кто его считывает, поэтому он а не продьюсер пишет в лог, если я верно поняла задание.
+
+Реализация в ./src/microservices/events.
+
+Скриншоты в папке
+[Screenshots](screenshots)
 
 # Задание 3
 
-Команда начала переезд в Kubernetes для лучшего масштабирования и повышения надежности. 
+Команда начала переезд в Kubernetes для лучшего масштабирования и повышения надежности.
 Вам, как архитектору осталось самое сложное:
  - реализовать CI/CD для сборки прокси сервиса
  - реализовать необходимые конфигурационные файлы для переключения трафика.
 
+### Решение задания - выполнение шагов ниже и добавленные файлы.
 
 ### CI/CD
 
  В папке .github/worflows доработайте деплой новых сервисов proxy и events в docker-build-push.yml , чтобы api-tests при сборке отрабатывали корректно при отправке коммита в ваш репозиторий.
 
-Нужно доработать 
+Нужно доработать
 ```yaml
 on:
   push:
@@ -115,7 +181,7 @@ jobs:
 #### Шаг 1
 Для деплоя в kubernetes необходимо залогиниться в docker registry Github'а.
 1. Создайте Personal Access Token (PAT) https://github.com/settings/tokens . Создавайте class с правом read:packages
-2. В src/kubernetes/*.yaml (event-service, monolith, movies-service и proxy-service)  отредактируйте путь до ваших образов 
+2. В src/kubernetes/*.yaml (event-service, monolith, movies-service и proxy-service)  отредактируйте путь до ваших образов
 ```bash
  spec:
       containers:
@@ -137,11 +203,11 @@ jobs:
         }
 }
 ```
-то выполните 
+то выполните
 
 и добавьте
 
-```json 
+```json
  "auth": "имя пользователя:токен в base64"
 ```
 
@@ -166,7 +232,7 @@ cat .docker/config.json | base64
 
   Доработайте src/kubernetes/event-service.yaml и src/kubernetes/proxy-service.yaml
 
-  - Необходимо создать Deployment и Service 
+  - Необходимо создать Deployment и Service
   - Доработайте ingress.yaml, чтобы можно было с помощью тестов проверить создание событий
   - Выполните дальшейшие шаги для поднятия кластера:
 
@@ -193,8 +259,8 @@ cat .docker/config.json | base64
   ```
   Вы увидите
 
-  NAME         READY   STATUS    
-  postgres-0   1/1     Running   
+  NAME         READY   STATUS
+  postgres-0   1/1     Running
 
   4. Разверните Kafka:
   ```bash
@@ -220,7 +286,7 @@ cat .docker/config.json | base64
   kubectl apply -f src/kubernetes/proxy-service.yaml
   ```
 
-  После запуска и поднятия подов вывод команды 
+  После запуска и поднятия подов вывод команды
   ```bash
   kubectl -n cinemaabyss get pod
   ```
@@ -228,21 +294,21 @@ cat .docker/config.json | base64
   Будет наподобие такого
 
 ```bash
-  NAME                              READY   STATUS    
+  NAME                              READY   STATUS
 
-  events-service-7587c6dfd5-6whzx   1/1     Running  
+  events-service-7587c6dfd5-6whzx   1/1     Running
 
-  kafka-0                           1/1     Running   
+  kafka-0                           1/1     Running
 
-  monolith-8476598495-wmtmw         1/1     Running  
+  monolith-8476598495-wmtmw         1/1     Running
 
-  movies-service-6d5697c584-4qfqs   1/1     Running  
+  movies-service-6d5697c584-4qfqs   1/1     Running
 
-  postgres-0                        1/1     Running  
+  postgres-0                        1/1     Running
 
-  proxy-service-577d6c549b-6qfcv    1/1     Running  
+  proxy-service-577d6c549b-6qfcv    1/1     Running
 
-  zookeeper-0                       1/1     Running 
+  zookeeper-0                       1/1     Running
 ```
 
   8. Добавим ingress
@@ -277,7 +343,7 @@ cat .docker/config.json | base64
 
 
 # Задание 4
-Для простоты дальнейшего обновления и развертывания вам как архитектуру необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу 
+Для простоты дальнейшего обновления и развертывания вам как архитектуру необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу
 
 Для этого:
 1. Перейдите в директорию helm и отредактируйте файл values.yaml
@@ -330,7 +396,7 @@ template:
 kubectl delete all --all -n cinemaabyss
 kubectl delete  namespace cinemaabyss
 ```
-Запустите 
+Запустите
 ```bash
 helm install cinemaabyss .\src\kubernetes\helm --namespace cinemaabyss --create-namespace
 ```
@@ -346,7 +412,7 @@ kubectl get pods -n cinemaabyss
 minikube tunnel
 ```
 
-Потом вызовите 
+Потом вызовите
 https://cinemaabyss.example.com/api/movies
 и приложите скриншот развертывания helm и вывода https://cinemaabyss.example.com/api/movies
 
