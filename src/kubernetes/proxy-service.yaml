@@ -1,12 +1,15 @@
+{{- if .Values.proxyService.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: proxy-service
-  namespace: cinemaabyss
+  namespace: {{ .Values.global.namespace }}
   labels:
     app: proxy-service
+    app.kubernetes.io/name: {{ include "cinemaabyss.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.proxyService.replicas }}
   selector:
     matchLabels:
       app: proxy-service
@@ -22,19 +25,19 @@ spec:
     spec:
       containers:
       - name: proxy-service
-        image: ghcr.io/irapolubes/architecture-cinemaabyss/proxy-service:latest
-        imagePullPolicy: Always
+        image: {{ .Values.proxyService.image.repository }}:{{ .Values.proxyService.image.tag }}
+        imagePullPolicy: {{ .Values.proxyService.image.pullPolicy }}
         ports:
-        - containerPort: 8000
+        - containerPort: {{ .Values.proxyService.service.targetPort }}
         env:
         - name: PORT
-          value: "8000"
+          value: "{{ .Values.proxyService.service.targetPort }}"
         - name: MONOLITH_URL
-          value: "http://monolith:8080"
+          value: "http://monolith:{{ .Values.monolith.service.port }}"
         - name: MOVIES_SERVICE_URL
-          value: "http://movies-service:8081"
+          value: "http://movies-service:{{ .Values.moviesService.service.port }}"
         - name: EVENTS_SERVICE_URL
-          value: "http://events-service:8082"
+          value: "http://events-service:{{ .Values.eventsService.service.port }}"
         - name: GRADUAL_MIGRATION
           valueFrom:
             configMapKeyRef:
@@ -46,22 +49,17 @@ spec:
               name: cinemaabyss-config
               key: MOVIES_MIGRATION_PERCENT
         resources:
-          limits:
-            cpu: "300m"
-            memory: "256Mi"
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
+          {{- toYaml .Values.proxyService.resources | nindent 10 }}
         readinessProbe:
           httpGet:
             path: /health
-            port: 8000
+            port: {{ .Values.proxyService.service.targetPort }}
           initialDelaySeconds: 10
           periodSeconds: 10
         livenessProbe:
           httpGet:
             path: /health
-            port: 8000
+            port: {{ .Values.proxyService.service.targetPort }}
           initialDelaySeconds: 20
           periodSeconds: 20
       restartPolicy: Always
@@ -72,11 +70,16 @@ apiVersion: v1
 kind: Service
 metadata:
   name: proxy-service
-  namespace: cinemaabyss
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: proxy-service
+    app.kubernetes.io/name: {{ include "cinemaabyss.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   selector:
     app: proxy-service
   ports:
-  - port: 8000
-    targetPort: 8000
-  type: ClusterIP
+  - port: {{ .Values.proxyService.service.port }}
+    targetPort: {{ .Values.proxyService.service.targetPort }}
+  type: {{ .Values.proxyService.service.type }}
+{{- end }}

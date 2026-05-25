@@ -1,12 +1,15 @@
+{{- if .Values.eventsService.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: events-service
-  namespace: cinemaabyss
+  namespace: {{ .Values.global.namespace }}
   labels:
     app: events-service
+    app.kubernetes.io/name: {{ include "cinemaabyss.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.eventsService.replicas }}
   selector:
     matchLabels:
       app: events-service
@@ -22,47 +25,27 @@ spec:
     spec:
       containers:
       - name: events-service
-        image: ghcr.io/irapolubes/architecture-cinemaabyss/events-service:latest
-        imagePullPolicy: Always
+        image: {{ .Values.eventsService.image.repository }}:{{ .Values.eventsService.image.tag }}
+        imagePullPolicy: {{ .Values.eventsService.image.pullPolicy }}
         ports:
-        - containerPort: 8082
+        - containerPort: {{ .Values.eventsService.service.targetPort }}
         env:
         - name: PORT
-          value: "8082"
+          value: "{{ .Values.eventsService.service.targetPort }}"
         - name: KAFKA_BROKERS
           value: "kafka:9092"
+        - name: DB_CONNECTION_STRING
+          value: "postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable"
+        envFrom:
+        - configMapRef:
+            name: cinemaabyss-config
+        - secretRef:
+            name: cinemaabyss-secrets
         resources:
-          limits:
-            cpu: "300m"
-            memory: "256Mi"
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
+          {{- toYaml .Values.eventsService.resources | nindent 10 }}
         readinessProbe:
           httpGet:
             path: /api/events/health
-            port: 8082
+            port: {{ .Values.eventsService.service.targetPort }}
           initialDelaySeconds: 10
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /api/events/health
-            port: 8082
-          initialDelaySeconds: 20
-          periodSeconds: 20
-      restartPolicy: Always
-      imagePullSecrets:
-        - name: dockerconfigjson
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: events-service
-  namespace: cinemaabyss
-spec:
-  selector:
-    app: events-service
-  ports:
-  - port: 8082
-    targetPort: 8082
-  type: ClusterIP
+          periodSeconds:

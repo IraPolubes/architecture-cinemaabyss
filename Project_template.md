@@ -180,6 +180,10 @@ jobs:
 
 ### Proxy в Kubernetes
 
+## ДИСКЛЕЙМЕР:
+В задании ниже указали 127.0.0.1, я записала маппинг с ним но сайт не открывался. С помощью нейросети выяснила что в некоторых режимах Minikube Ingress действительно пробрасывается на localhost, но в моей конфигурации Minikube с Docker driver Ingress получил внешний адрес 192.168.49.2 (kubectl -n cinemaabyss get ingress показал ADDRESS = 192.168.49.2), поэтому запись 127.0.0.1 cinemaabyss.example.com направляла браузер и curl на localhost моей машины, где на порту 80 ничего не слушало, из-за чего был connection refused;
+Для выполнения я переписала cinemaabyss.example.com в /etc/hosts с указанием на фактический IP ingress-controller, (192.168.49.2 для cinemaabyss.example.com, а не 127.0.0.1.)
+
 #### Шаг 1
 Для деплоя в kubernetes необходимо залогиниться в docker registry Github'а.
 1. Создайте Personal Access Token (PAT) https://github.com/settings/tokens . Создавайте class с правом read:packages
@@ -344,6 +348,11 @@ cat .docker/config.json | base64
 Добавьте сюда скриншота вывода при вызове https://cinemaabyss.example.com/api/movies и  скриншот вывода event-service после вызова тестов.
 
 
+Скриншоты в папке
+[Screenshots](screenshots)
+
+
+
 # Задание 4
 Для простоты дальнейшего обновления и развертывания вам как архитектуру необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу
 
@@ -424,3 +433,7 @@ https://cinemaabyss.example.com/api/movies
 kubectl delete all --all -n cinemaabyss
 kubectl delete namespace cinemaabyss
 ```
+
+
+Скриншоты в папке
+[Screenshots](screenshots)
