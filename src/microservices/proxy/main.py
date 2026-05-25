@@ -13,7 +13,7 @@ app = FastAPI(title="CinemaAbyss Proxy Service")
 
 MONOLITH_URL = os.getenv("MONOLITH_URL", "http://monolith:8080")
 MOVIES_SERVICE_URL = os.getenv("MOVIES_SERVICE_URL", "http://movies-service:8081")
-
+EVENTS_SERVICE_URL = os.getenv("EVENTS_SERVICE_URL", "http://events-service:8082") # for ingress with kubernetes
 GRADUAL_MIGRATION = os.getenv("GRADUAL_MIGRATION", "false").lower() == "true"
 
 try:
@@ -65,10 +65,14 @@ def choose_target(path: str) -> str:
     Selects the upstream service for the request.
 
     Feature-flag routing is applied only to /api/movies routes.
+    Event routes are sent to Events Service.
     All other routes stay on the monolith.
     """
     if path.startswith("/api/movies"):
         return choose_movies_target()
+
+    if path.startswith("/api/events"):
+        return EVENTS_SERVICE_URL
 
     return MONOLITH_URL
 
